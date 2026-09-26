@@ -482,6 +482,29 @@ impl Primitives for AdminSpace {
                 }
             }
         }
+
+        // Reload interceptors so runtime configuration changes reach already-connected
+        // faces. `update_config` rebuilds the interceptor chain from the current config
+        // and reinstalls it on every existing face. Runs after every config write because
+        // the interceptor set is derived from the full config: filtering by key would let
+        // interceptor config go stale (e.g. `qos`) and would need updating whenever
+        // upstream adds an interceptor section. Config writes are rare, so the occasional
+        // redundant rebuild is cheaper than a stale ACL. Applied here, on the write path,
+        // because the config-diff notifier is gated behind the `plugins` feature.
+        let config = self.context.runtime.state.config.lock();
+        if let Err(e) = self
+            .context
+            .runtime
+            .router()
+            .tables
+            .update_config(&config)
+        {
+            tracing::error!(
+                "Failed to apply interceptor configuration after change on '{}': {}",
+                key,
+                e
+            );
+        }
     }
 
     fn send_request(&self, msg: &mut Request) {
