@@ -176,17 +176,6 @@ impl<T> Clone for Notifier<T> {
     }
 }
 
-fn ensure_config_key_is_dynamically_writable(key: &str) -> ZResult<()> {
-    if !key.starts_with("plugins/") {
-        bail!(
-            "Error inserting conf value {} : updating config is only \
-                supported for keys starting with `plugins/`",
-            key
-        );
-    }
-    Ok(())
-}
-
 impl Notifier<ExpandedConfig> {
     pub fn new(inner: ExpandedConfig) -> Self {
         Notifier {
@@ -256,14 +245,12 @@ impl Notifier<ExpandedConfig> {
     }
 
     pub fn insert_json5(&self, key: &str, value: &str) -> ZResult<()> {
-        ensure_config_key_is_dynamically_writable(key)?;
         self.lock_config().insert_json5(key, value)?;
         self.notify(key);
         Ok(())
     }
 
     pub fn try_insert_json5_array_item(&self, key: &str, value: &str) -> ZResult<bool> {
-        ensure_config_key_is_dynamically_writable(key)?;
         let applied = self.lock_config().try_insert_json5_array_item(key, value)?;
         if applied {
             self.notify(key);
@@ -279,11 +266,10 @@ mod tests {
     use crate::Config;
 
     #[test]
-    fn runtime_try_insert_json5_array_item_rejects_non_plugin_keys() {
+    fn runtime_try_insert_json5_array_item_applies_non_plugin_keys() {
         let config = super::Notifier::new(zenoh_config::Config::default().expanded());
-        let before = config.lock().get_json("qos/network").unwrap();
 
-        let err = config
+        assert!(config
             .try_insert_json5_array_item(
                 "qos/network/id=item1",
                 r#"{
@@ -294,12 +280,11 @@ mod tests {
                     flows: ["egress"]
                 }"#,
             )
-            .unwrap_err();
+            .unwrap());
 
-        assert!(err
-            .to_string()
-            .contains("supported for keys starting with `plugins/`"));
-        assert_eq!(config.lock().get_json("qos/network").unwrap(), before);
+        let qos = config.lock().get_json("qos/network").unwrap();
+        let items = qos.as_array().unwrap();
+        assert!(items.iter().any(|item| item["id"] == "item1"));
     }
 
     #[test]
